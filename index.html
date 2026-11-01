@@ -55,6 +55,13 @@ h1{font-size:1.5rem;font-weight:800;margin:0 0 2px;letter-spacing:-.01em}
 #over p{margin:2px 0}
 #over .go{margin-top:14px;padding:10px 22px}
 .wrap{position:relative}
+#colorUI{position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;z-index:3}
+#colorUI[hidden]{display:none}
+.cb{border-radius:8px;border:2px solid var(--line);font:800 1.7rem/1.1 inherit;font-family:inherit;cursor:pointer;display:grid;place-content:center;gap:6px}
+.cb small{font-size:.95rem;font-weight:600;opacity:.75}
+.cb.d{background:var(--dk);color:#fff}.cb.w{background:var(--lt);color:#1b2332}
+.cb:focus-visible{outline:3px solid var(--acc);outline-offset:3px}
+.cb.ok{outline:6px solid var(--ok)}.cb.bad{outline:6px solid var(--bad)}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
 </head>
@@ -75,6 +82,7 @@ h1{font-size:1.5rem;font-weight:800;margin:0 0 2px;letter-spacing:-.01em}
   <button type="button" id="rep" hidden style="margin:-2px 0 10px;font:inherit;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer">Hear again (R)</button>
   <div class="wrap">
     <div id="board" role="grid" aria-label="Chess board"></div>
+    <div id="colorUI" hidden><button type="button" class="cb d" id="cD">Dark<small>press B</small></button><button type="button" class="cb w" id="cW">White<small>press W</small></button></div>
     <div id="over"><div><h2 id="oTitle">Time</h2><p id="oBody"></p><p id="oBest"></p><button class="go" id="again">Play again</button></div></div>
   </div>
   <div class="keys" id="keys" hidden>
@@ -92,7 +100,7 @@ h1{font-size:1.5rem;font-weight:800;margin:0 0 2px;letter-spacing:-.01em}
   <div class="grp"><label>Board view</label><div class="seg" id="orient"></div></div>
   <div class="grp"><label>Correct-answer sound</label><div class="seg" id="sound"></div></div>
   <div class="grp"><label>Wrong-answer sound</label><div class="seg" id="wrong"></div></div>
-  <div class="grp"><label>Call out the target aloud (Click it mode)</label><div class="seg" id="prompt"></div>
+  <div class="grp"><label>Call out the target aloud (Click it and Square color modes)</label><div class="seg" id="prompt"></div>
     <p class="hint">The app says the square, column or row at full volume. Press R to hear it again.</p></div>
   <div class="grp"><label>Say “White view” or “Black view” aloud</label><div class="seg" id="viewsay"></div></div>
   <div class="grp"><label>Speak the name after a correct answer</label><div class="seg" id="speak"></div></div>
@@ -108,8 +116,8 @@ const $=s=>document.querySelector(s);
 const CFG={
   scope:{opts:[['squares','Squares'],['files','Columns (files)'],['ranks','Rows (ranks)'],['lines','Rows + columns']],
     hint:{squares:'Individual squares like e4.',files:'Only the columns a to h.',ranks:'Only the rows 1 to 8.',lines:'Randomly mixes columns and rows.'}},
-  mode:{opts:[['find','Click it'],['name','Name it']],
-    hint:{find:'You get a name, then click it on the board.',name:'The board highlights something, then you name it.'}},
+  mode:{opts:[['find','Click it'],['name','Name it'],['color','Square color']],
+    hint:{find:'You get a name, then click it on the board.',name:'The board highlights something, then you name it.',color:'A square like a4 appears and you choose Dark or White (keys B and W). The board is hidden. Squares only, so the Train and view settings don\u2019t apply.'}},
   time:{opts:[[30,'30 s'],[60,'60 s'],[0,'No limit']]},
   orient:{opts:[['white','White'],['black','Black'],['random','Random']]},
   sound:{opts:[['on','On'],['off','Off']]},
@@ -174,16 +182,19 @@ function label(t){return t.type==='sq'?F[t.f]+t.r:t.type==='file'?'File '+F[t.f]
 function newTarget(){
   let t,tries=0;
   do{
-    let type=S.scope==='squares'?'sq':S.scope==='files'?'file':S.scope==='ranks'?'rank':(Math.random()<.5?'file':'rank');
+    let type=S.mode==='color'||S.scope==='squares'?'sq':S.scope==='files'?'file':S.scope==='ranks'?'rank':(Math.random()<.5?'file':'rank');
     t={type,f:Math.floor(Math.random()*8),r:1+Math.floor(Math.random()*8)};
   }while(run.t&&label(t)===label(run.t)&&++tries<20);
   run.t=t;run.got={};
-  if(S.orient==='random'){view=Math.random()<.5?'white':'black';buildBoard()}
+  if(S.orient==='random'&&S.mode!=='color'){view=Math.random()<.5?'white':'black';buildBoard()}
   run.say=(S.viewsay==='on'&&(S.orient==='random'||run.first))?view+' view. ':'';
   run.first=false;
-  $('#viewTag').innerHTML=viewHtml();
+  $('#viewTag').innerHTML=S.mode==='color'?'':viewHtml();
   clearHl();
-  if(S.mode==='name'){
+  if(S.mode==='color'){
+    $('#promptText').innerHTML=label(t)+'<small>Is this square dark or light?</small>';
+    if(S.prompt==='on')shout(t,'');
+  }else if(S.mode==='name'){
     cellsFor(t).forEach(c=>c.classList.add('hl',t.type==='sq'?'one':'hl'));
     $('#promptText').innerHTML='?<small>Name the highlighted '+(t.type==='sq'?'square':t.type==='file'?'column':'row')+'</small>';
     if(S.prompt==='on'&&run.say)shout(null,run.say);
@@ -195,7 +206,7 @@ function newTarget(){
 }
 function updateKeys(){
   const t=run&&run.t;
-  $('#keys').hidden=!(run&&S.mode==='name');
+  $('#keys').hidden=!(run&&S.mode==='name');$('#rep').hidden=!(run&&(S.mode==='find'||S.mode==='color'));syncColor();
   if(!t)return;
   $('#kF').querySelectorAll('button').forEach(b=>b.disabled=t.type==='rank');
   $('#kR').querySelectorAll('button').forEach(b=>b.disabled=t.type==='file');
@@ -248,6 +259,7 @@ document.addEventListener('keydown',e=>{
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==='Escape'&&run){end(false);return}
   if(run&&S.mode==='name'&&e.key.length===1){type(e.key)}
+  if(run&&S.mode==='color'){const k=e.key.toLowerCase();if(k==='b'||k==='d')answerColor(true);else if(k==='w'||k==='l')answerColor(false);else if(k==='r'&&run.t)shout(run.t,'')}
   if(run&&S.mode==='find'&&e.key.toLowerCase()==='r'&&run.t)shout(run.t,S.viewsay==='on'?view+' view. ':'');
 });
 
@@ -285,6 +297,18 @@ function shout(t,pre){
   try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance((pre||'')+(t?sayText(t):''));u.volume=1;u.rate=.95;u.pitch=1.15;u.lang='en-US';speechSynthesis.speak(u)}catch(e){}
 }
 
+function syncColor(){
+  const on=S.mode==='color';
+  $('#board').style.visibility=on?'hidden':'visible';
+  $('#colorUI').hidden=!(on&&run);
+}
+function answerColor(dark){
+  if(!run||S.mode!=='color')return;
+  const t=run.t,isDark=(t.f+t.r)%2===1;
+  const btn=$(dark?'#cD':'#cW'),correct=$(isDark?'#cD':'#cW');
+  if(dark===isDark)right([btn]);
+  else{wrong([btn]);flash([correct],'ok')}
+}
 function stats(){
   $('#sScore').textContent=run?run.ok:0;
   $('#sStreak').textContent=run?run.streak:0;
@@ -292,8 +316,8 @@ function stats(){
   $('#sAcc').textContent=n?Math.round(100*run.ok/n)+'%':'–';
 }
 function idle(){
-  clearHl();$('#promptText').textContent='Press Start';$('#keys').hidden=true;$('#rep').hidden=true;
-  $('#viewTag').textContent=S.orient==='random'?'The board flips to White or Black view on every question':'';
+  syncColor();clearHl();$('#promptText').textContent='Press Start';$('#keys').hidden=true;$('#rep').hidden=true;
+  $('#viewTag').textContent=S.mode!=='color'&&S.orient==='random'?'The board flips to White or Black view on every question':'';
   $('#sScore').textContent=0;$('#sStreak').textContent=0;$('#sAcc').textContent='–';
   $('#sTime').textContent=S.time?S.time+'s':'∞';$('#bar').style.width='100%';
   $('#start').textContent='Start';
@@ -323,7 +347,7 @@ function end(silent){
   clearInterval(run.timer);
   const r=run;run=null;
   clearHl();$('#keys').hidden=true;
-  $('#start').textContent='Start';$('#promptText').textContent='Round over';$('#rep').hidden=true;
+  $('#start').textContent='Start';$('#promptText').textContent='Round over';$('#rep').hidden=true;syncColor();
   if(silent)return;
   const n=r.ok+r.miss,acc=n?Math.round(100*r.ok/n):0;
   const secs=Math.max(1,(performance.now()-r.t0)/1000);
@@ -338,7 +362,8 @@ function end(silent){
 }
 $('#start').onclick=()=>run?end(false):start();
 $('#again').onclick=start;
-$('#rep').onclick=()=>{if(run&&run.t)shout(run.t,S.viewsay==='on'?view+' view. ':'')};
+$('#cD').onclick=()=>answerColor(true);$('#cW').onclick=()=>answerColor(false);
+$('#rep').onclick=()=>{if(run&&run.t)shout(run.t,S.viewsay==='on'&&S.mode!=='color'?view+' view. ':'')};
 $('#coords').onchange=()=>{save();buildBoard();if(run)newTargetKeep()};
 function newTargetKeep(){if(S.mode==='name'){clearHl();cellsFor(run.t).forEach(c=>c.classList.add('hl',run.t.type==='sq'?'one':'hl'))}}
 
